@@ -1,6 +1,7 @@
 {
- "name": "মো. আবু শাহিদ — স্টাডি প্ল্যানার",
- "short_name": "স্টাডি",
+ "name": "মাই স্টাডি",
+ "short_name": "মাই স্টাডি",
+ "description": "মো. আবু শাহিদের স্টাডি প্ল্যানার",
  "start_url": "./",
  "scope": "./",
  "display": "standalone",
