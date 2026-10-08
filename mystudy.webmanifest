@@ -1,0 +1,26 @@
+{
+ "name": "মাই স্টাডি",
+ "short_name": "মাই স্টাডি",
+ "description": "মো. আবু শাহিদের স্টাডি প্ল্যানার",
+ "id": "./app.html",
+ "start_url": "./app.html",
+ "scope": "./",
+ "display": "standalone",
+ "background_color": "#f6f7f5",
+ "theme_color": "#1e7a4d",
+ "lang": "bn",
+ "icons": [
+  {
+   "src": "mystudy-192.png",
+   "sizes": "192x192",
+   "type": "image/png",
+   "purpose": "any maskable"
+  },
+  {
+   "src": "mystudy-512.png",
+   "sizes": "512x512",
+   "type": "image/png",
+   "purpose": "any maskable"
+  }
+ ]
+}
