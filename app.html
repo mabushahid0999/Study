@@ -106,8 +106,8 @@ nav button.on{color:var(--accent);font-weight:700}
 .att .d{flex:1}
 </style>
 <link rel="manifest" href="mystudy.webmanifest">
-<meta name="apple-mobile-web-app-title" content="মাই স্টাডি">
 <meta name="theme-color" content="#1e7a4d">
+<meta name="apple-mobile-web-app-title" content="মাই স্টাডি">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <link rel="icon" href="mystudy-192.png">
@@ -116,8 +116,9 @@ nav button.on{color:var(--accent);font-weight:700}
 <body>
 <header>
   <h1>📘 মো. আবু শাহিদ</h1>
-  <div class="sub" style="font-weight:600;color:var(--accent)">স্টাডি প্ল্যানার (Gemini সংস্করণ) • লক্ষ্য: অফিস সহকারী কাম কম্পিউটার মুদ্রাক্ষরিক</div>
+  <div class="sub" style="font-weight:600;color:var(--accent)">স্টাডি প্ল্যানার • লক্ষ্য: অফিস সহকারী কাম কম্পিউটার মুদ্রাক্ষরিক</div>
   <div class="sub" id="hdate"></div>
+  <div class="sub" id="syncst"></div>
 </header>
 <main id="app"></main>
 <nav id="nav">
@@ -167,7 +168,7 @@ function shuffle(a){for(var i=a.length-1;i>0;i--){var j=Math.floor(Math.random()
 var KEY2="studyPlannerV2",KEY1="studyPlannerV1",DK="studyExamDetail_";
 function blank(){return {v:2,startDate:"2026-10-08",pattern:"",checks:{},logs:{},exams:[],updated:0}}
 var S=blank();
-var dbc=null,dirty={meta:false,days:{},exams:{},del:{}},saveTimer=null;
+var BK=null,dirty={meta:false,days:{},exams:{},del:{}},saveTimer=null;
 
 function fromV1(x){
   var o=blank();o.pattern=x.pattern||"";o.logs=x.logs||{};o.updated=x.updated||Date.now();
@@ -186,25 +187,34 @@ function loadLocal(){
 function saveLocal(){try{localStorage.setItem(KEY2,JSON.stringify(S))}catch(e){}}
 function persist(){S.updated=Date.now();saveLocal();dirty.meta=true;sched()}
 function markDay(k){dirty.days[k]=1}
-function sched(){clearTimeout(saveTimer);saveTimer=setTimeout(flush,900)}
+function sched(){clearTimeout(saveTimer);saveTimer=setTimeout(flush,(BK&&BK.gran==="month")?2500:900)}
 function getLocalDetail(id){try{var r=localStorage.getItem(DK+id);return r?JSON.parse(r):null}catch(e){return null}}
 function putDetail(id,det){try{localStorage.setItem(DK+id,JSON.stringify(det))}catch(e){}dirty.exams[id]=1}
+function setSync(t){var e=document.getElementById("syncst");if(e)e.textContent=t||"";lastSync=t||""}
+var lastSync="";
+function dayObj(k){var c=S.checks[k],l=S.logs[k];return ((c&&Object.keys(c).length)||(l&&l.length))?{checks:c||{},logs:l||[]}:null}
+function metaObj(){return {v:2,startDate:S.startDate,pattern:S.pattern,exams:S.exams.slice(-300),updated:S.updated}}
 async function flush(){
-  if(!dbc)return;
+  if(!BK)return;
   var d=dirty;dirty={meta:false,days:{},exams:{},del:{}};
-  var base="data/users/"+dbc.id+"/";
   try{
-    if(d.meta)await dbc.db.doc(base+"meta").set({json:JSON.stringify({v:2,startDate:S.startDate,pattern:S.pattern,exams:S.exams.slice(-300),updated:S.updated})});
-    for(var k in d.days){
-      var c=S.checks[k],l=S.logs[k],empty=(!c||!Object.keys(c).length)&&(!l||!l.length);
-      var ref=dbc.db.doc(base+"days/"+k);
-      if(empty){try{await ref.delete()}catch(e){}}else await ref.set({date:k,json:JSON.stringify({checks:c||{},logs:l||[]})});
-    }
-    for(var id in d.exams){var det=getLocalDetail(id);if(det)await dbc.db.doc(base+"exams/"+id).set({json:JSON.stringify(det)})}
-    for(var id2 in d.del){try{await dbc.db.doc(base+"exams/"+id2).delete()}catch(e){}}
+    if(d.meta)await BK.putMeta(metaObj());
+    if(BK.gran==="month"){
+      var ms={};Object.keys(d.days).forEach(function(k){ms[k.slice(0,7)]=1});
+      for(var m in ms){
+        var obj={},any=false;
+        Object.keys(S.checks).concat(Object.keys(S.logs)).forEach(function(k){if(k.slice(0,7)===m&&!obj[k]){var o=dayObj(k);if(o){obj[k]=o;any=true}}});
+        if(any)await BK.putMonth(m,obj);else await BK.delMonth(m);
+      }
+    }else{for(var k in d.days)await BK.putDay(k,dayObj(k))}
+    for(var id in d.exams){var det=getLocalDetail(id);if(det)await BK.putExam(id,det)}
+    for(var id2 in d.del)await BK.delExam(id2);
+    setSync("☁ "+BK.name+"-এ সংরক্ষিত ✓ "+fmtTime(Date.now()));
   }catch(e){
     dirty.meta=dirty.meta||d.meta;
     Object.keys(d.days).forEach(function(k){dirty.days[k]=1});Object.keys(d.exams).forEach(function(k){dirty.exams[k]=1});Object.keys(d.del).forEach(function(k){dirty.del[k]=1});
+    setSync("☁ সিঙ্ক হয়নি: "+(e&&e.message?e.message:"সংযোগ সমস্যা")+" — আবার চেষ্টা হবে");
+    clearTimeout(saveTimer);saveTimer=setTimeout(flush,30000);
   }
 }
 function pushAll(){
@@ -213,33 +223,28 @@ function pushAll(){
   S.exams.forEach(function(e){if(e.hasDetail&&getLocalDetail(e.id))dirty.exams[e.id]=1});
   sched();
 }
-async function initDb(){
+async function syncInit(){
+  if(!BK)return;
   try{
-    if(!window.claude)return;
-    var db=await claude.use("db"),user=await claude.use("user");
-    if(!db||!user)return;
-    var id=await user.id();if(!id)return;
-    dbc={db:db,id:id};
-    var base="data/users/"+id+"/";
-    var ms=await db.doc(base+"meta").get();
-    if(ms.exists){
-      var m=JSON.parse(ms.data().json);
+    setSync("☁ "+BK.name+" থেকে মিলিয়ে দেখা হচ্ছে…");
+    var m=await BK.getMeta();
+    if(m){
       if((m.updated||0)>(S.updated||0)){
-        var snap=await db.collection(base+"days").limit(1000).get(),checks={},logs={};
-        snap.docs.forEach(function(ds){try{var dd=JSON.parse(ds.data().json);if(dd.checks&&Object.keys(dd.checks).length)checks[ds.id]=dd.checks;if(dd.logs&&dd.logs.length)logs[ds.id]=dd.logs}catch(e){}});
+        var all=await BK.getAllDays(),checks={},logs={};
+        Object.keys(all).forEach(function(k){var o=all[k]||{};if(o.checks&&Object.keys(o.checks).length)checks[k]=o.checks;if(o.logs&&o.logs.length)logs[k]=o.logs});
         S=Object.assign(blank(),{startDate:m.startDate||S.startDate,pattern:m.pattern||"",exams:m.exams||[],checks:checks,logs:logs,updated:m.updated});
-        saveLocal();render();
-      }else if((S.updated||0)>(m.updated||0)){pushAll()}
-    }else{
-      var ls=await db.doc(base+"state").get();
-      if(!S.updated&&ls.exists){try{S=fromV1(JSON.parse(ls.data().json));saveLocal();render()}catch(e){}}
-      if(S.updated)pushAll();
+        saveLocal();render();setSync("☁ "+BK.name+" থেকে তথ্য ফিরিয়ে আনা হয়েছে ✓");return;
+      }else if((S.updated||0)>(m.updated||0)){pushAll();return}
+      setSync("☁ "+BK.name+"-এ সংরক্ষিত ✓ (মিলে আছে)");return;
     }
-  }catch(e){}
+    if(!S.updated&&BK.legacy){var lg=await BK.legacy();if(lg){try{S=fromV1(lg);saveLocal();render()}catch(e){}}}
+    if(S.updated)pushAll();else setSync("☁ "+BK.name+" সংযুক্ত ✓");
+  }catch(e){setSync("☁ সংযোগ হয়নি: "+(e&&e.message?e.message:"সমস্যা"))}
 }
+async function initSync(){try{BK=await makeBackend();if(BK)await syncInit();else setSync("")}catch(e){}}
 async function getDetail(id){
   var d=getLocalDetail(id);if(d)return d;
-  if(dbc){try{var s=await dbc.db.doc("data/users/"+dbc.id+"/exams/"+id).get();if(s.exists){var j=JSON.parse(s.data().json);try{localStorage.setItem(DK+id,JSON.stringify(j))}catch(e){}return j}}catch(e){}}
+  if(BK){try{var j=await BK.getExam(id);if(j){try{localStorage.setItem(DK+id,JSON.stringify(j))}catch(e){}return j}}catch(e){}}
   return null;
 }
 
@@ -290,6 +295,7 @@ function render(){
   var btns=document.querySelectorAll("#nav button"),cur=tab==="review"?"prog":tab;
   for(var i=0;i<btns.length;i++)btns[i].classList.toggle("on",btns[i].dataset.t===cur);
   var app=document.getElementById("app");
+  var se=document.getElementById("syncst");if(se)se.textContent=lastSync;
   app.innerHTML=tab==="today"?vToday():tab==="log"?vLog():tab==="quiz"?vQuiz():tab==="review"?vReview():vProg();
   bind();
 }
@@ -838,6 +844,7 @@ async function scanPhotos(files,autoSave){
 }
 
 var IS_GEMINI=true;
+/* ---------- Gemini ---------- */
 var GBASE="https://generativelanguage.googleapis.com/v1beta/";
 var GFALL=["gemini-2.5-flash","gemini-2.5-flash-lite","gemini-2.0-flash","gemini-flash-latest","gemini-flash-lite-latest"];
 function gKey(){try{return localStorage.getItem("geminiKey")||""}catch(e){return ""}}
@@ -874,14 +881,7 @@ var GEM={
     throw last||{code:"upstream_error"};
   }
 };
-try{if(navigator.storage&&navigator.storage.persist)navigator.storage.persist()}catch(e){}
 async function getSample(){return GEM}
-function vSettings(){
-  return '<div class="card"><div class="h">Gemini সেটিংস</div><div class="small">API কী শুধু এই ফোনেই থাকে। AI Studio-তে দেখানো “Gemini API Key 2” কেবল কী-এর একটি লেবেল। এখানে বসাতে হবে কী-এর লম্বা কোডটি (সাধারণত AIza দিয়ে শুরু)। মডেল নিজে থেকে বেছে নেওয়া হয়।</div>'+
-   '<label for="gk">Gemini API কী (কোড)</label><input type="password" id="gk" value="'+esc(gKey())+'">'+
-   '<button class="btn" id="gsave">সেভ করে যাচাই করুন</button><div class="small" id="gmsg" style="margin-top:6px;white-space:pre-wrap"></div>'+
-   '<div class="small">বর্তমান মডেল: '+esc(gSaved()||"এখনো বাছা হয়নি")+'</div></div>';
-}
 async function gDetect(setMsg){
   var key=gKey();
   var r;try{r=await gFetch(GBASE+"models?pageSize=200&key="+encodeURIComponent(key),{})}catch(e){setMsg("✗ "+errText(e.code,e.detail));return}
@@ -896,6 +896,94 @@ async function gDetect(setMsg){
   try{await GEM.json('শুধু JSON দিন: {"ok":true}',{});setMsg("✓ সব ঠিক আছে। মডেল: "+pick)}
   catch(e){setMsg("কী ঠিক, কিন্তু টেস্ট ব্যর্থ:\n"+errText(e&&e.code,e&&e.detail))}
 }
+/* ---------- GitHub ডেটাবেজ (প্রাইভেট রিপোজিটরি) ---------- */
+function ghTok(){try{return localStorage.getItem("ghToken")||""}catch(e){return ""}}
+function ghRepoName(){try{return localStorage.getItem("ghRepo")||"study-data"}catch(e){return "study-data"}}
+function ghLogin(){try{return localStorage.getItem("ghLogin")||""}catch(e){return ""}}
+function u64(s){var by=new TextEncoder().encode(s),bin="";for(var i=0;i<by.length;i++)bin+=String.fromCharCode(by[i]);return btoa(bin)}
+function d64(b){var bin=atob(String(b).replace(/\s/g,"")),by=new Uint8Array(bin.length);for(var i=0;i<bin.length;i++)by[i]=bin.charCodeAt(i);return new TextDecoder().decode(by)}
+function ghErr(r,what){var m="GitHub "+r.status;if(r.status===401)m="টোকেন ঠিক নয় বা মেয়াদ শেষ";else if(r.status===403)m="অনুমতি নেই (টোকেনে Contents: Read and write দিয়েছেন তো?)";else if(r.status===404)m="রিপোজিটরি/ফাইল পাওয়া যায়নি, অথবা টোকেনের এই রিপোজিটরিতে অনুমতি নেই";return new Error(m+(what?" ["+what+"]":""))}
+function ghBackend(token,repoFull){
+  var api="https://api.github.com/repos/"+repoFull+"/contents/",shas={};
+  function hd(extra){var h={"Authorization":"Bearer "+token,"Accept":"application/vnd.github+json","X-GitHub-Api-Version":"2022-11-28"};if(extra)for(var k in extra)h[k]=extra[k];return h}
+  async function rq(method,path,body){
+    try{return await fetch(api+path,{method:method,headers:hd(body?{"Content-Type":"application/json"}:null),body:body?JSON.stringify(body):undefined,cache:"no-store"})}
+    catch(e){throw new Error("ইন্টারনেট সংযোগ সমস্যা")}
+  }
+  async function get(path){
+    var r=await rq("GET",path);if(r.status===404)return null;if(!r.ok)throw ghErr(r,path);
+    var j=await r.json();shas[path]=j.sha;
+    if(Array.isArray(j))return j;
+    if(j.content&&j.encoding==="base64")return d64(j.content);
+    var r2=await fetch(api+path,{headers:hd({"Accept":"application/vnd.github.raw+json"}),cache:"no-store"});
+    if(!r2.ok)throw ghErr(r2,path);return await r2.text();
+  }
+  async function put(path,text,msg){
+    var body={message:msg||"update",content:u64(text)};
+    if(shas[path])body.sha=shas[path];
+    var r=await rq("PUT",path,body);
+    if(r.status===409||r.status===422){var g=await rq("GET",path);if(g.ok){var gj=await g.json();shas[path]=gj.sha;body.sha=gj.sha}else delete body.sha;r=await rq("PUT",path,body)}
+    if(!r.ok)throw ghErr(r,path);
+    var j=await r.json();if(j.content)shas[path]=j.content.sha;
+  }
+  async function del(path){
+    if(!shas[path]){var g=await rq("GET",path);if(g.status===404)return;if(!g.ok)throw ghErr(g,path);shas[path]=(await g.json()).sha}
+    var r=await rq("DELETE",path,{message:"delete",sha:shas[path]});
+    if(!r.ok&&r.status!==404)throw ghErr(r,path);delete shas[path];
+  }
+  return {name:"GitHub",gran:"month",
+    putMeta:function(o){return put("meta.json",JSON.stringify(o),"meta")},
+    getMeta:async function(){var t=await get("meta.json");return t?JSON.parse(t):null},
+    putMonth:function(m,o){return put("days/"+m+".json",JSON.stringify(o),"days "+m)},
+    delMonth:function(m){return del("days/"+m+".json")},
+    getAllDays:async function(){
+      var out={},list=await get("days");if(!list)return out;
+      for(var i=0;i<list.length;i++){if(!/\.json$/.test(list[i].name))continue;var t=await get("days/"+list[i].name);if(t){var o=JSON.parse(t);for(var k in o)out[k]=o[k]}}
+      return out;
+    },
+    putExam:function(i,o){return put("exams/"+i+".json",JSON.stringify(o),"exam")},
+    delExam:function(i){return del("exams/"+i+".json")},
+    getExam:async function(i){var t=await get("exams/"+i+".json");return t?JSON.parse(t):null}
+  };
+}
+async function makeBackend(){
+  var t=ghTok(),lg=ghLogin();
+  if(!t||!lg)return null;
+  return ghBackend(t,lg+"/"+ghRepoName());
+}
+async function ghConnect(setMsg){
+  var tok=document.getElementById("ght").value.trim(),repo=(document.getElementById("ghr").value.trim()||"study-data");
+  if(!tok){setMsg("আগে টোকেন বসান।");return}
+  try{
+    setMsg("যাচাই হচ্ছে…");
+    var h={"Authorization":"Bearer "+tok,"Accept":"application/vnd.github+json","X-GitHub-Api-Version":"2022-11-28"};
+    var r=await fetch("https://api.github.com/user",{headers:h,cache:"no-store"});
+    if(!r.ok){setMsg("✗ "+ghErr(r,"user").message);return}
+    var login=(await r.json()).login;
+    var r2=await fetch("https://api.github.com/repos/"+login+"/"+repo,{headers:h,cache:"no-store"});
+    if(!r2.ok){setMsg("✗ আপনার অ্যাকাউন্টে “"+repo+"” নামে রিপোজিটরি পাওয়া যায়নি, অথবা টোকেনের সেই রিপোজিটরির অনুমতি নেই।");return}
+    var rj=await r2.json();
+    if(!rj.private){setMsg("✗ এই রিপোজিটরি Public! আপনার সব তথ্য সবাই দেখতে পারবে। সংযোগ করা হয়নি। GitHub-এ রিপোজিটরিটি Private করুন (Settings → Danger Zone → Change visibility) অথবা নতুন Private রিপোজিটরি বানান।");return}
+    try{localStorage.setItem("ghToken",tok);localStorage.setItem("ghRepo",repo);localStorage.setItem("ghLogin",login)}catch(e){setMsg("✗ ফোনে সেভ করা যায়নি।");return}
+    BK=ghBackend(tok,login+"/"+repo);
+    setMsg("✓ সংযুক্ত হয়েছে ("+login+"/"+repo+")। তথ্য মেলানো হচ্ছে…");
+    await syncInit();
+    setMsg("✓ সংযুক্ত ও মেলানো শেষ। এখন থেকে তথ্য নিজে নিজে GitHub-এর প্রাইভেট রিপোজিটরিতে জমা হবে।");
+  }catch(e){setMsg("✗ "+(e&&e.message?e.message:"সংযোগ করা যায়নি"))}
+}
+function vSettings(){
+  var on=!!(ghTok()&&ghLogin());
+  return '<div class="card"><div class="h">☁ ডেটাবেজ (GitHub প্রাইভেট রিপোজিটরি)</div>'+
+   '<div class="small">'+(on?'সংযুক্ত: '+esc(ghLogin())+'/'+esc(ghRepoName())+'। Chrome-এর তথ্য মুছলেও এখান থেকে সব ফিরে আসবে।':'এখনো সংযুক্ত নয়। সংযুক্ত করলে আপনার সব তথ্য আপনার প্রাইভেট রিপোজিটরিতেও জমা থাকবে, Chrome মুছলেও হারাবে না।')+'</div>'+
+   '<label for="ght">GitHub টোকেন (github_pat_… দিয়ে শুরু)</label><input type="password" id="ght" value="'+esc(ghTok())+'">'+
+   '<label for="ghr">রিপোজিটরির নাম</label><input type="text" id="ghr" value="'+esc(ghRepoName())+'">'+
+   '<button class="btn" id="ghgo">সংযুক্ত করে যাচাই করুন</button>'+(on?'<button class="btn alt" id="ghsync">এখনই সব তথ্য GitHub-এ পাঠান</button>':'')+
+   '<div class="small" id="ghmsg" style="margin-top:6px;white-space:pre-wrap"></div></div>'+
+   '<div class="card"><div class="h">Gemini সেটিংস</div><div class="small">API কী শুধু এই ফোনেই থাকে। AI Studio-তে দেখানো “Gemini API Key 2” কেবল কী-এর একটি লেবেল। এখানে বসাতে হবে কী-এর লম্বা কোডটি (সাধারণত AIza দিয়ে শুরু)। মডেল নিজে থেকে বেছে নেওয়া হয়।</div>'+
+   '<label for="gk">Gemini API কী (কোড)</label><input type="password" id="gk" value="'+esc(gKey())+'">'+
+   '<button class="btn" id="gsave">সেভ করে যাচাই করুন</button><div class="small" id="gmsg" style="margin-top:6px;white-space:pre-wrap"></div>'+
+   '<div class="small">বর্তমান মডেল: '+esc(gSaved()||"এখনো বাছা হয়নি")+'</div></div>';
+}
 function bindSettings(q,qa){
   if(q("#gsave"))q("#gsave").onclick=function(){
     var m=q("#gmsg"),v=q("#gk").value.trim();
@@ -903,15 +991,17 @@ function bindSettings(q,qa){
     try{localStorage.setItem("geminiKey",v)}catch(e){m.textContent="সেভ করা যায়নি।";return}
     m.textContent="যাচাই হচ্ছে…";gDetect(function(t){m.textContent=t});
   };
+  if(q("#ghgo"))q("#ghgo").onclick=function(){var m=q("#ghmsg");ghConnect(function(t){m.textContent=t})};
+  if(q("#ghsync"))q("#ghsync").onclick=function(){var m=q("#ghmsg");pushAll();m.textContent="পাঠানো হচ্ছে… উপরের ☁ লেখায় ফলাফল দেখুন।"};
 }
-function backupSave(name,data,m){
-  try{var bl=new Blob([data],{type:"application/json;charset=utf-8"}),a=document.createElement("a");a.href=URL.createObjectURL(bl);a.download=name;document.body.appendChild(a);a.click();a.remove();m.textContent="ব্যাকআপ ডাউনলোড হয়েছে ✓"}
+function backupSave(name,data,m,mime){
+  try{var bl=new Blob([data],{type:(mime||"application/json")+";charset=utf-8"}),a=document.createElement("a");a.href=URL.createObjectURL(bl);a.download=name;document.body.appendChild(a);a.click();a.remove();m.textContent="ব্যাকআপ ডাউনলোড হয়েছে ✓"}
   catch(e){m.textContent="সংরক্ষণ করা হয়নি।"}
 }
 
 
 try{if(navigator.storage&&navigator.storage.persist)navigator.storage.persist()}catch(e){}
-loadLocal();render();initDb();
+loadLocal();render();initSync();
 try{if("serviceWorker" in navigator&&location.protocol.indexOf("http")===0)navigator.serviceWorker.register("sw2.js")}catch(e){}
 </script>
 </body>
