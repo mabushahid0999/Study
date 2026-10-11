@@ -97,6 +97,7 @@ nav button.on{color:var(--accent);font-weight:700}
 .link.g{color:var(--accent)}
 .timer{position:sticky;top:env(safe-area-inset-top,0px);z-index:4;display:flex;justify-content:space-between;align-items:center;background:var(--accent);color:#fff;border-radius:10px;padding:8px 14px;margin:6px 0;font-weight:700}
 .timer.low{background:var(--bad)}
+.rng{width:100%;accent-color:var(--accent);height:30px;margin:8px 0 2px}
 .hist{display:flex;align-items:center;gap:8px;padding:10px 0;border-bottom:1px solid var(--line)}
 .hist:last-child{border-bottom:0}
 .hist .go{flex:1;min-width:0;text-align:left;background:none;border:0;color:var(--text);font:inherit;cursor:pointer;padding:0}
@@ -606,36 +607,40 @@ var SYL_PFX={"বাংলা":"b","ইংরেজি":"e","গণিত":"m","
 function defaultList(sb){
   return SYL_DEF[sb].map(function(x,i){var isA=Array.isArray(x);return {id:SYL_PFX[sb]+(i+1),t:isA?x[1]:x,g:isA?x[0]:""}});
 }
-function defaultSyl(){var o={v:1,subjects:{},done:{}};Object.keys(SYL_DEF).forEach(function(sb){o.subjects[sb]=defaultList(sb)});return o}
-function syl(){if(!S.syl||!S.syl.subjects)S.syl=defaultSyl();if(!S.syl.done)S.syl.done={};return S.syl}
-var sylSub="বাংলা",sylEdit=false,sylPend={},sylEditId=null,sylMsg="";
-function sylCount(sb){var Y=syl(),its=Y.subjects[sb]||[],d=0;its.forEach(function(x){if(Y.done[x.id])d++});return {d:d,n:its.length}}
+function defaultSyl(){var o={v:1,subjects:{},done:{},pr:{}};Object.keys(SYL_DEF).forEach(function(sb){o.subjects[sb]=defaultList(sb)});return o}
+function syl(){if(!S.syl||!S.syl.subjects)S.syl=defaultSyl();if(!S.syl.done)S.syl.done={};if(!S.syl.pr)S.syl.pr={};return S.syl}
+var sylSub="বাংলা",sylEdit=false,sylPendP={},sylEditId=null,sylMsg="";
+function pctOf(id){var Y=syl();if(Y.pr[id]&&typeof Y.pr[id].p==="number")return Y.pr[id].p;return Y.done[id]?100:0}
+function atOf(id){var Y=syl();if(Y.pr[id]&&Y.pr[id].at)return Y.pr[id].at;return Y.done[id]||0}
+function sylCount(sb){var Y=syl(),its=Y.subjects[sb]||[],full=0,sum=0;its.forEach(function(x){var p=pctOf(x.id);sum+=p;if(p>=100)full++});return {d:full,n:its.length,avg:its.length?Math.round(sum/its.length):0}}
 function vSyl(){
-  var Y=syl(),subs=Object.keys(Y.subjects),h="",td=0,tn=0;
-  subs.forEach(function(sb){var c=sylCount(sb);td+=c.d;tn+=c.n});
-  h+='<div class="card"><div class="h">📚 সিলেবাস অগ্রগতি</div><div class="stat"><div><b>'+bn(td)+'/'+bn(tn)+'</b><span>মোট বিষয় শেষ</span></div><div><b>'+bn(tn?Math.round(td/tn*100):0)+'%</b><span>সিলেবাস শেষ</span></div></div>';
-  subs.forEach(function(sb){var c=sylCount(sb),p=c.n?Math.round(c.d/c.n*100):0;
-    h+='<div class="r7" style="margin-top:10px"><div style="width:104px;flex:0 0 104px">'+esc(sb)+'</div><div class="bar grow"><i style="width:'+p+'%"></i></div><div class="small" style="width:56px;text-align:right">'+bn(c.d)+'/'+bn(c.n)+'</div></div>'});
+  var Y=syl(),subs=Object.keys(Y.subjects),h="",td=0,tn=0,tsum=0;
+  subs.forEach(function(sb){var c=sylCount(sb);td+=c.d;tn+=c.n;tsum+=c.avg*c.n});
+  h+='<div class="card"><div class="h">📚 সিলেবাস অগ্রগতি</div><div class="stat"><div><b>'+bn(tn?Math.round(tsum/tn):0)+'%</b><span>মোট অগ্রগতি</span></div><div><b>'+bn(td)+'/'+bn(tn)+'</b><span>সম্পূর্ণ বিষয়</span></div></div>';
+  subs.forEach(function(sb){var c=sylCount(sb);
+    h+='<div class="r7" style="margin-top:10px"><div style="width:104px;flex:0 0 104px">'+esc(sb)+'</div><div class="bar grow"><i style="width:'+c.avg+'%"></i></div><div class="small" style="width:80px;text-align:right">'+bn(c.avg)+'% • '+bn(c.d)+'/'+bn(c.n)+'</div></div>'});
   h+='</div>';
   h+='<div class="chips">'+subs.map(function(sb){return '<button class="chip'+(sb===sylSub?" on":"")+'" data-ss="'+esc(sb)+'">'+esc(sb)+'</button>'}).join("")+'</div>';
   var its=Y.subjects[sylSub]||[],c=sylCount(sylSub),pg="";
-  h+='<div class="card"><div class="row"><div class="h grow" style="margin:0">'+esc(sylSub)+' — '+bn(c.d)+'/'+bn(c.n)+' শেষ</div><button class="chip'+(sylEdit?" on":"")+'" id="sedit">'+(sylEdit?"✔ সম্পাদনা শেষ":"✎ সম্পাদনা")+'</button></div>';
-  if(!sylEdit)h+='<div class="small" style="margin:4px 0 6px">পড়া শেষ হলে ঘরে চাপুন, তারপর নিচের “জমা দিন” চাপুন।</div>';
+  h+='<div class="card"><div class="row"><div class="h grow" style="margin:0">'+esc(sylSub)+' — '+bn(c.avg)+'% ('+bn(c.d)+'/'+bn(c.n)+' সম্পূর্ণ)</div><button class="chip'+(sylEdit?" on":"")+'" id="sedit">'+(sylEdit?"✔ সম্পাদনা শেষ":"✎ সম্পাদনা")+'</button></div>';
+  if(!sylEdit)h+='<div class="small" style="margin:4px 0 6px">যতটুকু পড়লেন স্লাইডার টেনে শতকরা ঠিক করুন, তারপর নিচে “জমা দিন” চাপুন। ১০০% হলে “সম্পূর্ণ” লেখা আসবে।</div>';
   its.forEach(function(x,i){
     if(x.g&&x.g!==pg){h+='<div class="tm" style="margin:12px 0 2px;color:var(--accent)">'+esc(x.g)+'</div>';pg=x.g}
-    var done=Y.done[x.id],pe=!done&&sylPend[x.id];
     if(sylEditId===x.id){
       h+='<div class="sess"><div class="grow"><input type="text" id="sren" value="'+esc(x.t)+'"><div class="row"><button class="btn" data-ssave="'+esc(x.id)+'" style="margin-top:8px">সেভ</button><button class="btn alt" id="scancel" style="margin-top:8px">বাতিল</button></div></div></div>';
       return;
     }
-    h+='<div class="sess'+(done?" done":"")+'">'+
-      (sylEdit?'<div style="width:34px;flex:0 0 34px;text-align:center;color:var(--muted);font-weight:700">'+bn(i+1)+'</div>':
-        '<button class="cb'+(done?" on":pe?" pend":"")+'" data-sid="'+esc(x.id)+'"'+(done?" disabled":"")+' aria-label="নির্বাচন">'+((done||pe)?"✓":"")+'</button>')+
-      '<div class="grow"><div class="tt">'+(sylEdit?'':bn(i+1)+'। ')+esc(x.t)+'</div>'+
-      (done?'<div class="dd"><span class="badge b-ok">শেষ — '+fmtDate(dkey(new Date(done)))+'</span> <button class="link" data-sun="'+esc(x.id)+'">'+(armed==="sy"+x.id?"নিশ্চিত? আবার চাপুন":"বাতিল করুন")+'</button></div>':'')+
-      (pe?'<div class="dd"><span class="badge b-n">নির্বাচিত</span></div>':'')+
-      (sylEdit?'<div class="row" style="margin-top:4px"><button class="link g" data-sren="'+esc(x.id)+'">✎ নাম বদলান</button><button class="link" data-sdel="'+esc(x.id)+'">'+(armed==="sd"+x.id?"নিশ্চিত? আবার চাপুন":"🗑 মুছুন")+'</button></div>':'')+
-      '</div></div>';
+    var p=pctOf(x.id),at=atOf(x.id),pen=(sylPendP[x.id]!==undefined),val=pen?sylPendP[x.id]:p;
+    h+='<div class="sess'+(p>=100?" done":"")+'"><div class="grow"><div class="tt">'+bn(i+1)+'। '+esc(x.t)+'</div>';
+    if(sylEdit){
+      h+='<div class="row" style="margin-top:4px"><button class="link g" data-sren="'+esc(x.id)+'">✎ নাম বদলান</button><button class="link" data-sdel="'+esc(x.id)+'">'+(armed==="sd"+x.id?"নিশ্চিত? আবার চাপুন":"🗑 মুছুন")+'</button></div>';
+    }else{
+      h+='<div class="row" style="margin-top:6px"><div class="bar grow"><i style="width:'+p+'%"></i></div><div class="small" style="width:46px;text-align:right"><b>'+bn(p)+'%</b></div></div>'+
+         (p>=100?'<div class="dd"><span class="badge b-ok">✓ সম্পূর্ণ'+(at?' — '+fmtDate(dkey(new Date(at))):'')+'</span></div>':(p>0&&at?'<div class="dd">সর্বশেষ জমা: '+fmtDate(dkey(new Date(at)))+'</div>':''))+
+         '<input type="range" class="rng" min="0" max="100" step="5" value="'+val+'" data-rg="'+esc(x.id)+'">'+
+         '<div class="row"><div class="small rl grow">'+(pen&&val!==p?'নির্বাচিত: <b>'+bn(val)+'%</b> (এখনো জমা হয়নি)':'স্লাইডার টেনে শতকরা ঠিক করুন')+'</div><button class="link g" data-r100="'+esc(x.id)+'">১০০% করুন</button></div>';
+    }
+    h+='</div></div>';
   });
   if(!its.length)h+='<div class="empty">এই বিষয়ে কোনো তালিকা নেই। “সম্পাদনা” চেপে যোগ করুন।</div>';
   h+='</div>';
@@ -646,9 +651,9 @@ function vSyl(){
        '<label for="sag">গ্রুপ/অধ্যায় (ঐচ্ছিক)</label><input type="text" id="sag" value="'+esc(last)+'" placeholder="খালি রাখলে গ্রুপ ছাড়া">'+
        '<button class="btn" id="sadd">➕ যোগ করুন</button>'+
        '<button class="btn alt" id="sreset">'+(armed==="sr"?"নিশ্চিত? আবার চাপুন — এই বিষয়ের তালিকা ডিফল্ট হবে":"এই বিষয়ের তালিকা আবার ডিফল্ট করুন")+'</button>'+
-       '<div class="small" style="margin-top:6px">ডিফল্ট করলে আপনার যোগ/বদল করা বিষয় মুছে যাবে, তবে আগের “শেষ” চিহ্ন থাকবে।</div></div>';
+       '<div class="small" style="margin-top:6px">ডিফল্ট করলে আপনার যোগ/বদল করা বিষয় মুছে যাবে, তবে আগের শতকরা থেকে যাবে।</div></div>';
   }else{
-    var np=Object.keys(sylPend).filter(function(id){return !Y.done[id]}).length;
+    var np=Object.keys(sylPendP).filter(function(id){return sylPendP[id]!==pctOf(id)}).length;
     h+='<button class="btn" id="scommit"'+(np?"":" disabled")+'>✔ জমা দিন'+(np?" ("+bn(np)+"টি)":"")+'</button>'+(sylMsg?'<div class="msg ok">'+esc(sylMsg)+'</div>':'');
   }
   return h;
@@ -657,12 +662,20 @@ function bindSyl(q,qa){
   var Y=syl();
   qa("[data-ss]").forEach(function(b){b.onclick=function(){sylSub=b.dataset.ss;sylEditId=null;sylMsg="";render()}});
   if(q("#sedit"))q("#sedit").onclick=function(){sylEdit=!sylEdit;sylEditId=null;armed="";sylMsg="";render()};
-  qa("[data-sid]").forEach(function(b){b.onclick=function(){var id=b.dataset.sid;if(sylPend[id])delete sylPend[id];else sylPend[id]=true;sylMsg="";keepScroll()}});
+  qa("[data-rg]").forEach(function(b){
+    b.oninput=function(){var l=b.parentNode.querySelector(".rl"),v=+b.value,cur=pctOf(b.dataset.rg);if(l)l.innerHTML=(v!==cur)?('নির্বাচিত: <b>'+bn(v)+'%</b> (এখনো জমা হয়নি)'):'স্লাইডার টেনে শতকরা ঠিক করুন'};
+    b.onchange=function(){var id=b.dataset.rg,v=+b.value;if(v===pctOf(id))delete sylPendP[id];else sylPendP[id]=v;sylMsg="";keepScroll()};
+  });
+  qa("[data-r100]").forEach(function(b){b.onclick=function(){var id=b.dataset.r100;if(pctOf(id)===100)delete sylPendP[id];else sylPendP[id]=100;sylMsg="";keepScroll()}});
   if(q("#scommit"))q("#scommit").onclick=function(){
-    var n=0;Object.keys(sylPend).forEach(function(id){if(!Y.done[id]){Y.done[id]=Date.now();n++}});
-    sylPend={};sylMsg=n?("জমা হয়েছে ✓ ("+bn(n)+"টি বিষয় শেষ)"):"";persist();keepScroll();
+    var n=0,now=Date.now();
+    Object.keys(sylPendP).forEach(function(id){
+      var v=sylPendP[id];if(v===pctOf(id))return;
+      if(v<=0){delete Y.pr[id];delete Y.done[id]}else{Y.pr[id]={p:v,at:now};if(v>=100)Y.done[id]=now;else delete Y.done[id]}
+      n++;
+    });
+    sylPendP={};sylMsg=n?("জমা হয়েছে ✓ ("+bn(n)+"টি বিষয়ের অগ্রগতি)"):"";persist();keepScroll();
   };
-  qa("[data-sun]").forEach(function(b){b.onclick=function(){var id="sy"+b.dataset.sun;if(armed!==id){armed=id;keepScroll();return}delete Y.done[b.dataset.sun];armed="";sylMsg="";persist();keepScroll()}});
   qa("[data-sren]").forEach(function(b){b.onclick=function(){sylEditId=b.dataset.sren;render()}});
   if(q("#scancel"))q("#scancel").onclick=function(){sylEditId=null;render()};
   qa("[data-ssave]").forEach(function(b){b.onclick=function(){
@@ -672,7 +685,8 @@ function bindSyl(q,qa){
   }});
   qa("[data-sdel]").forEach(function(b){b.onclick=function(){
     var id="sd"+b.dataset.sdel;if(armed!==id){armed=id;keepScroll();return}
-    Y.subjects[sylSub]=(Y.subjects[sylSub]||[]).filter(function(x){return x.id!==b.dataset.sdel});delete Y.done[b.dataset.sdel];delete sylPend[b.dataset.sdel];
+    var del=b.dataset.sdel;
+    Y.subjects[sylSub]=(Y.subjects[sylSub]||[]).filter(function(x){return x.id!==del});delete Y.done[del];delete Y.pr[del];delete sylPendP[del];
     armed="";persist();keepScroll();
   }});
   if(q("#sadd"))q("#sadd").onclick=function(){
@@ -811,7 +825,7 @@ function buildText(){
     L.push("");
   });
   L.push("— সিলেবাস —");
-  var Y=syl();Object.keys(Y.subjects).forEach(function(sb){var its=Y.subjects[sb],d=its.filter(function(x){return Y.done[x.id]}).length;L.push(sb+": "+bn(d)+"/"+bn(its.length)+" শেষ");its.forEach(function(x){if(Y.done[x.id])L.push("  ✓ "+x.t+" ("+fmtDate(dkey(new Date(Y.done[x.id])))+")")})});
+  var Y=syl();Object.keys(Y.subjects).forEach(function(sb){var c=sylCount(sb);L.push(sb+": "+bn(c.d)+"/"+bn(c.n)+" সম্পূর্ণ • গড় "+bn(c.avg)+"%");Y.subjects[sb].forEach(function(x){var p=pctOf(x.id);if(p>0)L.push("  "+(p>=100?"✓ ":"◐ ")+x.t+" — "+bn(p)+"%")})});
   L.push("");
   L.push("— পরীক্ষার ফলাফল —");
   S.exams.slice().reverse().forEach(function(e){L.push(fmtDate(e.date)+" | "+e.label+" | "+num(e.score)+"/"+num(e.max))});
