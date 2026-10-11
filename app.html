@@ -87,7 +87,7 @@ textarea{min-height:110px;resize:vertical}
 .msg.ok{background:var(--ok-soft);color:var(--ok)}
 .empty{color:var(--muted);text-align:center;padding:14px 0;font-size:14.5px}
 nav{position:fixed;left:0;right:0;bottom:0;display:flex;background:var(--card);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom,0px);z-index:5}
-nav button{flex:1;border:0;background:transparent;color:var(--muted);font:inherit;font-size:12.5px;padding:10px 2px 8px;cursor:pointer}
+nav button{flex:1;border:0;background:transparent;color:var(--muted);font:inherit;font-size:11.5px;line-height:1.3;padding:8px 1px 6px;cursor:pointer}
 nav button .ic{display:block;font-size:20px;line-height:1.1}
 nav button.on{color:var(--accent);font-weight:700}
 .h{font-size:16px;font-weight:700;margin:0 0 6px}
@@ -124,6 +124,7 @@ nav button.on{color:var(--accent);font-weight:700}
 <nav id="nav">
   <button data-t="today" class="on"><span class="ic">✅</span>আজকের রুটিন</button>
   <button data-t="log"><span class="ic">📝</span>আজ কী পড়লাম</button>
+  <button data-t="syl"><span class="ic">📚</span>সিলেবাস</button>
   <button data-t="quiz"><span class="ic">🎯</span>পরীক্ষা</button>
   <button data-t="prog"><span class="ic">📊</span>অগ্রগতি</button>
 </nav>
@@ -166,7 +167,7 @@ function shuffle(a){for(var i=a.length-1;i>0;i--){var j=Math.floor(Math.random()
 
 /* ================= অবস্থা ও সংরক্ষণ ================= */
 var KEY2="studyPlannerV2",KEY1="studyPlannerV1",DK="studyExamDetail_";
-function blank(){return {v:2,startDate:"2026-10-08",pattern:"",checks:{},logs:{},exams:[],updated:0}}
+function blank(){return {v:2,startDate:"2026-10-08",pattern:"",checks:{},logs:{},exams:[],syl:null,plan:null,updated:0}}
 var S=blank();
 var BK=null,dirty={meta:false,days:{},exams:{},del:{}},saveTimer=null;
 
@@ -193,12 +194,11 @@ function putDetail(id,det){try{localStorage.setItem(DK+id,JSON.stringify(det))}c
 function setSync(t){var e=document.getElementById("syncst");if(e)e.textContent=t||"";lastSync=t||""}
 var lastSync="";
 function dayObj(k){var c=S.checks[k],l=S.logs[k];return ((c&&Object.keys(c).length)||(l&&l.length))?{checks:c||{},logs:l||[]}:null}
-function metaObj(){return {v:2,startDate:S.startDate,pattern:S.pattern,exams:S.exams.slice(-300),updated:S.updated}}
+function metaObj(){return {v:2,startDate:S.startDate,pattern:S.pattern,exams:S.exams.slice(-300),syl:S.syl||null,plan:S.plan||null,updated:S.updated}}
 async function flush(){
   if(!BK)return;
   var d=dirty;dirty={meta:false,days:{},exams:{},del:{}};
   try{
-    if(d.meta)await BK.putMeta(metaObj());
     if(BK.gran==="month"){
       var ms={};Object.keys(d.days).forEach(function(k){ms[k.slice(0,7)]=1});
       for(var m in ms){
@@ -209,6 +209,7 @@ async function flush(){
     }else{for(var k in d.days)await BK.putDay(k,dayObj(k))}
     for(var id in d.exams){var det=getLocalDetail(id);if(det)await BK.putExam(id,det)}
     for(var id2 in d.del)await BK.delExam(id2);
+    if(d.meta)await BK.putMeta(metaObj());
     setSync("☁ "+BK.name+"-এ সংরক্ষিত ✓ "+fmtTime(Date.now()));
   }catch(e){
     dirty.meta=dirty.meta||d.meta;
@@ -232,7 +233,7 @@ async function syncInit(){
       if((m.updated||0)>(S.updated||0)){
         var all=await BK.getAllDays(),checks={},logs={};
         Object.keys(all).forEach(function(k){var o=all[k]||{};if(o.checks&&Object.keys(o.checks).length)checks[k]=o.checks;if(o.logs&&o.logs.length)logs[k]=o.logs});
-        S=Object.assign(blank(),{startDate:m.startDate||S.startDate,pattern:m.pattern||"",exams:m.exams||[],checks:checks,logs:logs,updated:m.updated});
+        S=Object.assign(blank(),{startDate:m.startDate||S.startDate,pattern:m.pattern||"",exams:m.exams||[],syl:m.syl||S.syl||null,plan:m.plan||S.plan||null,checks:checks,logs:logs,updated:m.updated});
         saveLocal();render();setSync("☁ "+BK.name+" থেকে তথ্য ফিরিয়ে আনা হয়েছে ✓");return;
       }else if((S.updated||0)>(m.updated||0)){pushAll();return}
       setSync("☁ "+BK.name+"-এ সংরক্ষিত ✓ (মিলে আছে)");return;
@@ -249,11 +250,14 @@ async function getDetail(id){
 }
 
 /* ================= দিনের হিসাব ================= */
-function dayInfo(d){var rows=PLAN[dayName(d)].rows,c=S.checks[dkey(d)]||{},n=0;for(var i=0;i<rows.length;i++)if(c[i])n++;return {n:n,total:rows.length}}
+function defRows(day){return PLAN[day].rows.map(function(r,i){return {id:String(i),tm:r[0],t:r[1],d:r[2],k:r[3]}})}
+function planRows(day){return (S.plan&&S.plan[day])?S.plan[day]:defRows(day)}
+function editPlan(day){if(!S.plan)S.plan={};if(!S.plan[day])S.plan[day]=defRows(day);return S.plan[day]}
+function dayInfo(d){var rows=planRows(dayName(d)),c=S.checks[dkey(d)]||{},n=0;rows.forEach(function(r){if(c[r.id])n++});return {n:n,total:rows.length}}
 function streak(){
   var d=today(),cnt=0,x=dayInfo(d);
-  if(!(dkey(d)>=S.startDate&&x.n===x.total))d.setDate(d.getDate()-1);
-  for(var i=0;i<400;i++){if(dkey(d)<S.startDate)break;var y=dayInfo(d);if(y.n===y.total){cnt++;d.setDate(d.getDate()-1)}else break}
+  if(!(dkey(d)>=S.startDate&&x.total>0&&x.n===x.total))d.setDate(d.getDate()-1);
+  for(var i=0;i<400;i++){if(dkey(d)<S.startDate)break;var y=dayInfo(d);if(y.total>0&&y.n===y.total){cnt++;d.setDate(d.getDate()-1)}else break}
   return cnt;
 }
 function attendance(){
@@ -261,7 +265,7 @@ function attendance(){
   if(S.startDate>tk)return {list:out,full:0,part:0,none:0,days:0};
   for(var i=0;i<800&&dkey(d)<=tk;i++){
     var k=dkey(d),x=dayInfo(d),st;
-    if(x.n===x.total)st="full";else if(k===tk)st=x.n?"part":"live";else st=x.n?"part":"none";
+    if(x.total>0&&x.n===x.total)st="full";else if(k===tk)st=x.n?"part":"live";else st=x.n?"part":"none";
     if(st==="full")full++;else if(st==="part"&&k!==tk)part++;else if(st==="none")none++;
     out.push({k:k,name:dayName(d),n:x.n,total:x.total,st:st,logs:(S.logs[k]||[]).length});
     d.setDate(d.getDate()+1);
@@ -296,39 +300,99 @@ function render(){
   for(var i=0;i<btns.length;i++)btns[i].classList.toggle("on",btns[i].dataset.t===cur);
   var app=document.getElementById("app");
   var se=document.getElementById("syncst");if(se)se.textContent=lastSync;
-  app.innerHTML=tab==="today"?vToday():tab==="log"?vLog():tab==="quiz"?vQuiz():tab==="review"?vReview():vProg();
+  app.innerHTML=tab==="today"?vToday():tab==="log"?vLog():tab==="quiz"?vQuiz():tab==="syl"?vSyl():tab==="review"?vReview():vProg();
   bind();
 }
 
 /* ---------- আজকের রুটিন ---------- */
+var rEdit=false,rEditId=null,rMsg="";
+function tOpts(sel){return Object.keys(TYPE).map(function(k){return '<option value="'+k+'"'+(sel===k?" selected":"")+'>'+TYPE[k][0]+'</option>'}).join("")}
+function inpS(id,v,ph){return '<input type="text" id="'+id+'" value="'+esc(v)+'" placeholder="'+esc(ph||"")+'">'}
 function vToday(){
   var tn=dayName(today()),key=dkey(today()),h='<div class="chips">';
   if(pendDate!==key){pend={};pendDate=key}
   ORDER.forEach(function(n){h+='<button class="chip'+(n===viewDay?" on":"")+(n===tn?" today":"")+'" data-day="'+n+'">'+n+(n===tn?" • আজ":"")+'</button>'});
   h+='</div>';
-  var p=PLAN[viewDay],isToday=viewDay===tn,c=S.checks[key]||{},done=0;
-  p.rows.forEach(function(r,i){if(isToday&&c[i])done++});
-  if(isToday){
-    h+='<div class="card"><div class="stat"><div><b>'+bn(done)+'/'+bn(p.rows.length)+'</b><span>আজ জমা হয়েছে</span></div><div><b>'+bn(streak())+'</b><span>টানা সম্পন্ন দিন</span></div></div>'+
-       '<div class="bar" style="margin-top:12px"><i style="width:'+Math.round(done/p.rows.length*100)+'%"></i></div></div>';
-    if(key<S.startDate)h+='<div class="msg">আপনার পড়া শুরুর তারিখ '+fmtDate(S.startDate)+'। আজকের দিনটি হিসাবে ধরা হবে না (পরীক্ষামূলক)।</div>';
-  }else h+='<div class="msg">এটি শুধু দেখার জন্য। জমা দিতে আজকের দিনটি বেছে নিন।</div>';
-  h+='<div class="card"><div class="h">'+esc(viewDay)+' — '+esc(p.sub)+'</div>';
-  p.rows.forEach(function(r,i){
-    var com=isToday&&c[i],pe=isToday&&!com&&pend[i],t=TYPE[r[3]];
-    h+='<div class="sess'+(com?" done":"")+'"><button class="cb'+(com?" on":pe?" pend":"")+'" data-i="'+i+'"'+((!isToday||com)?" disabled":"")+' aria-label="নির্বাচন">'+((com||pe)?"✓":"")+'</button>'+
-       '<div class="grow"><div class="tm">'+esc(r[0])+' <span class="badge '+t[1]+'">'+t[0]+'</span>'+(pe?' <span class="badge b-n">নির্বাচিত</span>':'')+(com?' <span class="badge b-ok">জমা হয়েছে'+(c[i]>1?' '+fmtTime(c[i]):'')+'</span>':'')+'</div>'+
-       '<div class="tt">'+esc(r[1])+'</div>'+(r[2]?'<div class="dd">'+esc(r[2])+'</div>':'')+
-       (com?'<button class="link" data-unc="'+i+'">'+(armed==="u"+i?"নিশ্চিত? আবার চাপুন":"জমা বাতিল করুন")+'</button>':'')+'</div></div>';
+  var p=PLAN[viewDay],rows=planRows(viewDay),isToday=viewDay===tn,c=S.checks[key]||{},done=0;
+  rows.forEach(function(r){if(isToday&&c[r.id])done++});
+  if(!rEdit){
+    if(isToday){
+      h+='<div class="card"><div class="stat"><div><b>'+bn(done)+'/'+bn(rows.length)+'</b><span>আজ জমা হয়েছে</span></div><div><b>'+bn(streak())+'</b><span>টানা সম্পন্ন দিন</span></div></div>'+
+         '<div class="bar" style="margin-top:12px"><i style="width:'+(rows.length?Math.round(done/rows.length*100):0)+'%"></i></div></div>';
+      if(key<S.startDate)h+='<div class="msg">আপনার পড়া শুরুর তারিখ '+fmtDate(S.startDate)+'। আজকের দিনটি হিসাবে ধরা হবে না (পরীক্ষামূলক)।</div>';
+    }else h+='<div class="msg">এটি শুধু দেখার জন্য। জমা দিতে আজকের দিনটি বেছে নিন।</div>';
+  }
+  h+='<div class="card"><div class="row"><div class="h grow" style="margin:0">'+esc(viewDay)+' — '+esc(p.sub)+'</div><button class="chip'+(rEdit?" on":"")+'" id="redit">'+(rEdit?"✔ সম্পাদনা শেষ":"✎ রুটিন সম্পাদনা")+'</button></div>';
+  if(rEdit)h+='<div class="small" style="margin:4px 0 6px">এখানকার বদল শুধু '+esc(viewDay)+'-এর জন্য। সব দিনের একই সময় বদলাতে নিচের “সব দিনের সময় বদলান” ব্যবহার করুন।</div>';
+  rows.forEach(function(r,i){
+    var t=TYPE[r.k]||TYPE.n,id=r.id;
+    if(rEdit){
+      if(rEditId===id){
+        h+='<div class="sess"><div class="grow"><label for="rtm">সময়</label>'+inpS("rtm",r.tm)+'<label for="rtt">বিষয়/কাজ</label>'+inpS("rtt",r.t)+'<label for="rdd">বিস্তারিত (ঐচ্ছিক)</label>'+inpS("rdd",r.d)+
+           '<label for="rtk">ধরন</label><select id="rtk">'+tOpts(r.k)+'</select>'+
+           '<div class="row"><button class="btn" data-rsave="'+esc(id)+'" style="margin-top:10px">সেভ</button><button class="btn alt" id="rcancel" style="margin-top:10px">বাতিল</button></div></div></div>';
+      }else{
+        h+='<div class="sess"><div class="grow"><div class="tm">'+esc(r.tm)+' <span class="badge '+t[1]+'">'+t[0]+'</span></div><div class="tt">'+esc(r.t)+'</div>'+(r.d?'<div class="dd">'+esc(r.d)+'</div>':'')+
+           '<div class="row" style="margin-top:4px;flex-wrap:wrap;gap:14px"><button class="link g" data-rup="'+esc(id)+'"'+(i===0?" disabled":"")+'>↑ উপরে</button><button class="link g" data-rdn="'+esc(id)+'"'+(i===rows.length-1?" disabled":"")+'>↓ নিচে</button><button class="link g" data-ren="'+esc(id)+'">✎ বদলান</button><button class="link" data-rdel="'+esc(id)+'">'+(armed==="rd"+id?"নিশ্চিত? আবার চাপুন":"🗑 মুছুন")+'</button></div></div></div>';
+      }
+      return;
+    }
+    var com=isToday&&c[id],pe=isToday&&!com&&pend[id];
+    h+='<div class="sess'+(com?" done":"")+'"><button class="cb'+(com?" on":pe?" pend":"")+'" data-i="'+esc(id)+'"'+((!isToday||com)?" disabled":"")+' aria-label="নির্বাচন">'+((com||pe)?"✓":"")+'</button>'+
+       '<div class="grow"><div class="tm">'+esc(r.tm)+' <span class="badge '+t[1]+'">'+t[0]+'</span>'+(pe?' <span class="badge b-n">নির্বাচিত</span>':'')+(com?' <span class="badge b-ok">জমা হয়েছে'+(c[id]>1?' '+fmtTime(c[id]):'')+'</span>':'')+'</div>'+
+       '<div class="tt">'+esc(r.t)+'</div>'+(r.d?'<div class="dd">'+esc(r.d)+'</div>':'')+
+       (com?'<button class="link" data-unc="'+esc(id)+'">'+(armed==="u"+id?"নিশ্চিত? আবার চাপুন":"জমা বাতিল করুন")+'</button>':'')+'</div></div>';
   });
+  if(!rows.length)h+='<div class="empty">এই দিনে কোনো সেশন নেই। “সম্পাদনা” চেপে যোগ করুন।</div>';
   h+='</div>';
-  if(isToday){
-    var np=0;p.rows.forEach(function(r,i){if(pend[i]&&!c[i])np++});
+  if(rEdit){
+    h+='<div class="card"><div class="h">➕ নতুন সেশন যোগ ('+esc(viewDay)+')</div><label for="ratm">সময়</label>'+inpS("ratm","","যেমন: ৫:৩০–৬:০০ AM")+'<label for="rat">বিষয়/কাজ</label>'+inpS("rat","","যেমন: কুরআন তিলাওয়াত")+
+       '<label for="rad">বিস্তারিত (ঐচ্ছিক)</label>'+inpS("rad","")+'<label for="rak">ধরন</label><select id="rak">'+tOpts("n")+'</select><button class="btn" id="radd">যোগ করুন</button></div>';
+    var seen={},tms=[];DAYS.forEach(function(d){planRows(d).forEach(function(r){if(!seen[r.tm]){seen[r.tm]=1;tms.push(r.tm)}})});
+    h+='<div class="card"><div class="h">🕒 সব দিনের সময় বদলান</div><div class="small">একই সময়ের সেশন সবকটি দিনে একসঙ্গে বদলে যাবে।</div><label for="rbo">কোন সময়টি বদলাবেন</label><select id="rbo">'+tms.map(function(x){return '<option>'+esc(x)+'</option>'}).join("")+'</select>'+
+       '<label for="rbn">নতুন সময়</label>'+inpS("rbn","","যেমন: ৫:৩০–৭:০০ AM")+'<button class="btn" id="rbgo">সব দিনে বদলান</button>'+(rMsg?'<div class="msg ok">'+esc(rMsg)+'</div>':'')+'</div>'+
+       '<div class="card"><button class="btn alt" id="rreset" style="margin-top:0">'+(armed==="rr"?"নিশ্চিত? আবার চাপুন — "+esc(viewDay)+"-এর রুটিন ডিফল্ট হবে":esc(viewDay)+"-এর রুটিন আবার ডিফল্ট করুন")+'</button><div class="small" style="margin-top:6px">ডিফল্ট করলে আপনার যোগ/বদল করা সেশন মুছে যাবে। আগের জমা দেওয়া টিক মূল সেশনের জন্য থেকে যাবে।</div></div>';
+  }else if(isToday){
+    var np=0;rows.forEach(function(r){if(pend[r.id]&&!c[r.id])np++});
     h+='<button class="btn" id="commit"'+(np?"":" disabled")+'>✔ জমা দিন'+(np?" ("+bn(np)+"টি)":"")+'</button>'+
        '<div class="small" style="margin:6px 2px">ঘরে চাপলে শুধু নির্বাচন হয়। “জমা দিন” চাপলে তবেই সংরক্ষিত হয় ও দিনের হিসাবে যোগ হয়।</div>'+
        (commitMsg?'<div class="msg ok">'+esc(commitMsg)+'</div>':'');
   }
   return h;
+}
+function moveRow(id,dir){var rows=editPlan(viewDay),i=-1;rows.forEach(function(x,j){if(x.id===id)i=j});var j2=i+dir;if(i<0||j2<0||j2>=rows.length)return;var t=rows[i];rows[i]=rows[j2];rows[j2]=t;persist();keepScroll()}
+function bindRoutine(q,qa){
+  if(q("#redit"))q("#redit").onclick=function(){rEdit=!rEdit;rEditId=null;armed="";rMsg="";render()};
+  qa("[data-rup]").forEach(function(b){b.onclick=function(){moveRow(b.dataset.rup,-1)}});
+  qa("[data-rdn]").forEach(function(b){b.onclick=function(){moveRow(b.dataset.rdn,1)}});
+  qa("[data-ren]").forEach(function(b){b.onclick=function(){rEditId=b.dataset.ren;render()}});
+  if(q("#rcancel"))q("#rcancel").onclick=function(){rEditId=null;render()};
+  qa("[data-rsave]").forEach(function(b){b.onclick=function(){
+    var tm=q("#rtm").value.trim(),t=q("#rtt").value.trim();
+    if(!tm||!t){alert("সময় ও বিষয়/কাজ দুটোই লিখুন।");return}
+    editPlan(viewDay).forEach(function(x){if(x.id===b.dataset.rsave){x.tm=tm;x.t=t;x.d=q("#rdd").value.trim();x.k=q("#rtk").value}});
+    rEditId=null;persist();render();
+  }});
+  qa("[data-rdel]").forEach(function(b){b.onclick=function(){
+    var id="rd"+b.dataset.rdel;if(armed!==id){armed=id;keepScroll();return}
+    var rows=editPlan(viewDay),i=-1;rows.forEach(function(x,j){if(x.id===b.dataset.rdel)i=j});if(i>=0)rows.splice(i,1);
+    delete pend[b.dataset.rdel];armed="";persist();keepScroll();
+  }});
+  if(q("#radd"))q("#radd").onclick=function(){
+    var tm=q("#ratm").value.trim(),t=q("#rat").value.trim();
+    if(!tm||!t){alert("সময় ও বিষয়/কাজ দুটোই লিখুন।");return}
+    editPlan(viewDay).push({id:"u"+Date.now().toString(36)+Math.floor(Math.random()*100),tm:tm,t:t,d:q("#rad").value.trim(),k:q("#rak").value});
+    persist();render();
+  };
+  if(q("#rbgo"))q("#rbgo").onclick=function(){
+    var o=q("#rbo").value,n=q("#rbn").value.trim();if(!n){alert("নতুন সময় লিখুন।");return}
+    var cnt=0;DAYS.forEach(function(d){if(planRows(d).some(function(r){return r.tm===o})){editPlan(d).forEach(function(r){if(r.tm===o){r.tm=n;cnt++}})}});
+    rMsg=bn(cnt)+"টি সেশনের সময় বদলেছে।";persist();render();
+  };
+  if(q("#rreset"))q("#rreset").onclick=function(){
+    if(armed!=="rr"){armed="rr";keepScroll();return}
+    if(S.plan)delete S.plan[viewDay];armed="";persist();render();
+  };
 }
 
 /* ---------- আজ কী পড়লাম ---------- */
@@ -525,6 +589,104 @@ function vProg(){
   return h;
 }
 
+/* ================= সিলেবাস ================= */
+var SYL_DEF={
+ "বাংলা":["সন্ধি","সমাস","কারক ও বিভক্তি","প্রত্যয়","এক কথায় প্রকাশ","বাগধারা","একই শব্দের বিভিন্ন প্রয়োগ","বানান শুদ্ধি","বাক্য শুদ্ধি","বিপরীত শব্দ","সমার্থক শব্দ","বিবিধ","বাংলা সাহিত্য","ভাবসম্প্রসারণ/অনুচ্ছেদ/পত্র"],
+ "ইংরেজি":["Gender","Number","Articles","Preposition","Right Form of Verb","Transformation of Sentence","Idioms and Phrases","Correction","Spelling Correction","Translations","Fill in the blanks","Miscellaneous","Paragraph/Letter"],
+ "গণিত":["ঐকিক নিয়ম, সময় ও কাজ","নল ও চৌবাচ্চা","নৌকা ও স্রোত","ট্রেন","অনুপাত, মিশ্রণ ও বয়স","সংখ্যার সমীকরণ","শতকরা হিসাব, লাভ–ক্ষতি","মুনাফা আসল","পরিমাপ","সরল ও দ্বিপদী সমীকরণ","দূরত্ব","ভগ্নাংশ","গড়","ধারা","সরল ও মান নির্ণয়","উৎপাদক","বীজগণিত রাশির গ.সা.গু ও ল.সা.গু","সমীকরণ সমাধান","বিবিধ","ত্রিকোণমিতি","জ্যামিতিক সংজ্ঞা"],
+ "সাধারণ জ্ঞান":[
+  ["বাংলাদেশ বিষয়াবলি","প্রাচীন বাংলা"],["বাংলাদেশ বিষয়াবলি","বাংলাদেশের অভ্যুদয় (১৯৪০-১৯৭০)"],["বাংলাদেশ বিষয়াবলি","মুক্তিযুদ্ধ ও বাংলাদেশ"],["বাংলাদেশ বিষয়াবলি","সংবিধান, জাতীয় সংসদ ও সরকার ব্যবস্থা"],["বাংলাদেশ বিষয়াবলি","বাংলাদেশের অর্থনীতি, সংস্কৃতি ও জাতীয় বিষয়াবলি"],["বাংলাদেশ বিষয়াবলি","ভৌগোলিক"],["বাংলাদেশ বিষয়াবলি","জুলাই গণঅভ্যুত্থান"],["বাংলাদেশ বিষয়াবলি","অন্তর্বর্তীকালীন সরকার ও ড. মুহাম্মদ ইউনূস"],["বাংলাদেশ বিষয়াবলি","বিশিষ্ট ব্যক্তিবর্গ"],["বাংলাদেশ বিষয়াবলি","বিবিধ"],
+  ["আন্তর্জাতিক বিষয়াবলি","দেশ-মহাদেশ"],["আন্তর্জাতিক বিষয়াবলি","ভৌগোলিক"],["আন্তর্জাতিক বিষয়াবলি","সংগঠন"],["আন্তর্জাতিক বিষয়াবলি","গণযোগাযোগ, যুদ্ধ, পুরস্কার"],["আন্তর্জাতিক বিষয়াবলি","বিবিধ"],
+  ["কম্পিউটার ও তথ্যপ্রযুক্তি","মৌলিক"],["কম্পিউটার ও তথ্যপ্রযুক্তি","অঙ্গ সংগঠন, ফাইল এক্সটেনশন, ফাংশন কী ব্যবহার"],["কম্পিউটার ও তথ্যপ্রযুক্তি","পার্থক্য"],["কম্পিউটার ও তথ্যপ্রযুক্তি","মাইক্রোসফট ওয়ার্ড-২০১৬ অনুসারে টুলবার ও শর্টকাট"],
+  ["অন্যান্য","বিজ্ঞান"],["অন্যান্য","পূর্ণরূপ"],["অন্যান্য","চলতি ও আগামীর বিশ্ব"],
+  ["প্রশ্ন সমাধান","বিসিএস প্রিলিমিনারি (১০তম-৪৬তম) এর প্রশ্ন সমাধান"],["প্রশ্ন সমাধান","২০১৮ সালে অনুষ্ঠিতব্য লিখিত পরীক্ষার প্রশ্ন সমাধান"],["প্রশ্ন সমাধান","২০১৯ সালে অনুষ্ঠিতব্য লিখিত পরীক্ষার প্রশ্ন সমাধান"],["প্রশ্ন সমাধান","২০২০ সালে অনুষ্ঠিতব্য লিখিত পরীক্ষার প্রশ্ন সমাধান"],["প্রশ্ন সমাধান","২০২১ সালে অনুষ্ঠিতব্য লিখিত পরীক্ষার প্রশ্ন সমাধান"],["প্রশ্ন সমাধান","২০২২ সালে অনুষ্ঠিতব্য লিখিত পরীক্ষার প্রশ্ন সমাধান"],["প্রশ্ন সমাধান","২০২২ সালে অনুষ্ঠিতব্য লিখিত পরীক্ষার প্রশ্ন সমাধান-২"],["প্রশ্ন সমাধান","২০২৩ সালে অনুষ্ঠিতব্য লিখিত পরীক্ষার প্রশ্ন সমাধান"],["প্রশ্ন সমাধান","২০২৪ সালে অনুষ্ঠিতব্য লিখিত পরীক্ষার প্রশ্ন সমাধান"]
+ ]
+};
+var SYL_PFX={"বাংলা":"b","ইংরেজি":"e","গণিত":"m","সাধারণ জ্ঞান":"g"};
+function defaultList(sb){
+  return SYL_DEF[sb].map(function(x,i){var isA=Array.isArray(x);return {id:SYL_PFX[sb]+(i+1),t:isA?x[1]:x,g:isA?x[0]:""}});
+}
+function defaultSyl(){var o={v:1,subjects:{},done:{}};Object.keys(SYL_DEF).forEach(function(sb){o.subjects[sb]=defaultList(sb)});return o}
+function syl(){if(!S.syl||!S.syl.subjects)S.syl=defaultSyl();if(!S.syl.done)S.syl.done={};return S.syl}
+var sylSub="বাংলা",sylEdit=false,sylPend={},sylEditId=null,sylMsg="";
+function sylCount(sb){var Y=syl(),its=Y.subjects[sb]||[],d=0;its.forEach(function(x){if(Y.done[x.id])d++});return {d:d,n:its.length}}
+function vSyl(){
+  var Y=syl(),subs=Object.keys(Y.subjects),h="",td=0,tn=0;
+  subs.forEach(function(sb){var c=sylCount(sb);td+=c.d;tn+=c.n});
+  h+='<div class="card"><div class="h">📚 সিলেবাস অগ্রগতি</div><div class="stat"><div><b>'+bn(td)+'/'+bn(tn)+'</b><span>মোট বিষয় শেষ</span></div><div><b>'+bn(tn?Math.round(td/tn*100):0)+'%</b><span>সিলেবাস শেষ</span></div></div>';
+  subs.forEach(function(sb){var c=sylCount(sb),p=c.n?Math.round(c.d/c.n*100):0;
+    h+='<div class="r7" style="margin-top:10px"><div style="width:104px;flex:0 0 104px">'+esc(sb)+'</div><div class="bar grow"><i style="width:'+p+'%"></i></div><div class="small" style="width:56px;text-align:right">'+bn(c.d)+'/'+bn(c.n)+'</div></div>'});
+  h+='</div>';
+  h+='<div class="chips">'+subs.map(function(sb){return '<button class="chip'+(sb===sylSub?" on":"")+'" data-ss="'+esc(sb)+'">'+esc(sb)+'</button>'}).join("")+'</div>';
+  var its=Y.subjects[sylSub]||[],c=sylCount(sylSub),pg="";
+  h+='<div class="card"><div class="row"><div class="h grow" style="margin:0">'+esc(sylSub)+' — '+bn(c.d)+'/'+bn(c.n)+' শেষ</div><button class="chip'+(sylEdit?" on":"")+'" id="sedit">'+(sylEdit?"✔ সম্পাদনা শেষ":"✎ সম্পাদনা")+'</button></div>';
+  if(!sylEdit)h+='<div class="small" style="margin:4px 0 6px">পড়া শেষ হলে ঘরে চাপুন, তারপর নিচের “জমা দিন” চাপুন।</div>';
+  its.forEach(function(x,i){
+    if(x.g&&x.g!==pg){h+='<div class="tm" style="margin:12px 0 2px;color:var(--accent)">'+esc(x.g)+'</div>';pg=x.g}
+    var done=Y.done[x.id],pe=!done&&sylPend[x.id];
+    if(sylEditId===x.id){
+      h+='<div class="sess"><div class="grow"><input type="text" id="sren" value="'+esc(x.t)+'"><div class="row"><button class="btn" data-ssave="'+esc(x.id)+'" style="margin-top:8px">সেভ</button><button class="btn alt" id="scancel" style="margin-top:8px">বাতিল</button></div></div></div>';
+      return;
+    }
+    h+='<div class="sess'+(done?" done":"")+'">'+
+      (sylEdit?'<div style="width:34px;flex:0 0 34px;text-align:center;color:var(--muted);font-weight:700">'+bn(i+1)+'</div>':
+        '<button class="cb'+(done?" on":pe?" pend":"")+'" data-sid="'+esc(x.id)+'"'+(done?" disabled":"")+' aria-label="নির্বাচন">'+((done||pe)?"✓":"")+'</button>')+
+      '<div class="grow"><div class="tt">'+(sylEdit?'':bn(i+1)+'। ')+esc(x.t)+'</div>'+
+      (done?'<div class="dd"><span class="badge b-ok">শেষ — '+fmtDate(dkey(new Date(done)))+'</span> <button class="link" data-sun="'+esc(x.id)+'">'+(armed==="sy"+x.id?"নিশ্চিত? আবার চাপুন":"বাতিল করুন")+'</button></div>':'')+
+      (pe?'<div class="dd"><span class="badge b-n">নির্বাচিত</span></div>':'')+
+      (sylEdit?'<div class="row" style="margin-top:4px"><button class="link g" data-sren="'+esc(x.id)+'">✎ নাম বদলান</button><button class="link" data-sdel="'+esc(x.id)+'">'+(armed==="sd"+x.id?"নিশ্চিত? আবার চাপুন":"🗑 মুছুন")+'</button></div>':'')+
+      '</div></div>';
+  });
+  if(!its.length)h+='<div class="empty">এই বিষয়ে কোনো তালিকা নেই। “সম্পাদনা” চেপে যোগ করুন।</div>';
+  h+='</div>';
+  if(sylEdit){
+    var last=its.length?its[its.length-1].g:"";
+    h+='<div class="card"><div class="h">নতুন বিষয় যোগ করুন ('+esc(sylSub)+')</div>'+
+       '<label for="sat">বিষয়ের নাম</label><input type="text" id="sat" placeholder="যেমন: সমাস">'+
+       '<label for="sag">গ্রুপ/অধ্যায় (ঐচ্ছিক)</label><input type="text" id="sag" value="'+esc(last)+'" placeholder="খালি রাখলে গ্রুপ ছাড়া">'+
+       '<button class="btn" id="sadd">➕ যোগ করুন</button>'+
+       '<button class="btn alt" id="sreset">'+(armed==="sr"?"নিশ্চিত? আবার চাপুন — এই বিষয়ের তালিকা ডিফল্ট হবে":"এই বিষয়ের তালিকা আবার ডিফল্ট করুন")+'</button>'+
+       '<div class="small" style="margin-top:6px">ডিফল্ট করলে আপনার যোগ/বদল করা বিষয় মুছে যাবে, তবে আগের “শেষ” চিহ্ন থাকবে।</div></div>';
+  }else{
+    var np=Object.keys(sylPend).filter(function(id){return !Y.done[id]}).length;
+    h+='<button class="btn" id="scommit"'+(np?"":" disabled")+'>✔ জমা দিন'+(np?" ("+bn(np)+"টি)":"")+'</button>'+(sylMsg?'<div class="msg ok">'+esc(sylMsg)+'</div>':'');
+  }
+  return h;
+}
+function bindSyl(q,qa){
+  var Y=syl();
+  qa("[data-ss]").forEach(function(b){b.onclick=function(){sylSub=b.dataset.ss;sylEditId=null;sylMsg="";render()}});
+  if(q("#sedit"))q("#sedit").onclick=function(){sylEdit=!sylEdit;sylEditId=null;armed="";sylMsg="";render()};
+  qa("[data-sid]").forEach(function(b){b.onclick=function(){var id=b.dataset.sid;if(sylPend[id])delete sylPend[id];else sylPend[id]=true;sylMsg="";keepScroll()}});
+  if(q("#scommit"))q("#scommit").onclick=function(){
+    var n=0;Object.keys(sylPend).forEach(function(id){if(!Y.done[id]){Y.done[id]=Date.now();n++}});
+    sylPend={};sylMsg=n?("জমা হয়েছে ✓ ("+bn(n)+"টি বিষয় শেষ)"):"";persist();keepScroll();
+  };
+  qa("[data-sun]").forEach(function(b){b.onclick=function(){var id="sy"+b.dataset.sun;if(armed!==id){armed=id;keepScroll();return}delete Y.done[b.dataset.sun];armed="";sylMsg="";persist();keepScroll()}});
+  qa("[data-sren]").forEach(function(b){b.onclick=function(){sylEditId=b.dataset.sren;render()}});
+  if(q("#scancel"))q("#scancel").onclick=function(){sylEditId=null;render()};
+  qa("[data-ssave]").forEach(function(b){b.onclick=function(){
+    var v=q("#sren").value.trim();if(!v){alert("নাম খালি রাখা যাবে না।");return}
+    (Y.subjects[sylSub]||[]).forEach(function(x){if(x.id===b.dataset.ssave)x.t=v});
+    sylEditId=null;persist();render();
+  }});
+  qa("[data-sdel]").forEach(function(b){b.onclick=function(){
+    var id="sd"+b.dataset.sdel;if(armed!==id){armed=id;keepScroll();return}
+    Y.subjects[sylSub]=(Y.subjects[sylSub]||[]).filter(function(x){return x.id!==b.dataset.sdel});delete Y.done[b.dataset.sdel];delete sylPend[b.dataset.sdel];
+    armed="";persist();keepScroll();
+  }});
+  if(q("#sadd"))q("#sadd").onclick=function(){
+    var t=q("#sat").value.trim(),g=q("#sag").value.trim();if(!t){alert("বিষয়ের নাম লিখুন।");return}
+    Y.subjects[sylSub]=Y.subjects[sylSub]||[];
+    Y.subjects[sylSub].push({id:"u"+Date.now().toString(36)+Math.floor(Math.random()*100),t:t,g:g});
+    persist();render();
+  };
+  if(q("#sreset"))q("#sreset").onclick=function(){
+    if(armed!=="sr"){armed="sr";keepScroll();return}
+    if(SYL_DEF[sylSub])Y.subjects[sylSub]=defaultList(sylSub);armed="";persist();render();
+  };
+}
+
 /* ================= ইভেন্ট ================= */
 function bind(){
   var q=function(s){return document.querySelector(s)},qa=function(s){return document.querySelectorAll(s)};
@@ -582,6 +744,8 @@ function bind(){
   if(q("#btxt"))q("#btxt").onclick=doText;
   if(q("#rs"))q("#rs").onchange=function(){doRestore(this.files[0])};
   bindSettings(q,qa);
+  bindSyl(q,qa);
+  bindRoutine(q,qa);
   if(quiz.run&&quiz.run.kind==="exam"&&!quiz.run.submitted)startTimer();
 }
 function keepScroll(){var y=window.scrollY;render();window.scrollTo(0,y)}
@@ -646,6 +810,9 @@ function buildText(){
     (S.logs[k]||[]).forEach(function(e){L.push("• "+e.s+": "+e.t)});
     L.push("");
   });
+  L.push("— সিলেবাস —");
+  var Y=syl();Object.keys(Y.subjects).forEach(function(sb){var its=Y.subjects[sb],d=its.filter(function(x){return Y.done[x.id]}).length;L.push(sb+": "+bn(d)+"/"+bn(its.length)+" শেষ");its.forEach(function(x){if(Y.done[x.id])L.push("  ✓ "+x.t+" ("+fmtDate(dkey(new Date(Y.done[x.id])))+")")})});
+  L.push("");
   L.push("— পরীক্ষার ফলাফল —");
   S.exams.slice().reverse().forEach(function(e){L.push(fmtDate(e.date)+" | "+e.label+" | "+num(e.score)+"/"+num(e.max))});
   return L.join("\n");
